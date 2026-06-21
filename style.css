@@ -7,6 +7,10 @@
   --border: #e5e7eb;
   --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
   --radius: 22px;
+  --primary: #2563eb;
+  --danger: #b91c1c;
+  --success: #047857;
+  --warning: #b45309;
 }
 
 * {
@@ -33,7 +37,7 @@ body {
 
 .eyebrow {
   margin: 0 0 8px;
-  color: #2563eb;
+  color: var(--primary);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -73,6 +77,117 @@ h1 {
   box-shadow: var(--shadow);
 }
 
+.status-card {
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.status-card strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.status-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.status-subtext {
+  font-size: 12px;
+}
+
+.reload-button {
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  color: white;
+  font: inherit;
+  font-weight: 800;
+  padding: 11px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.reload-button:hover {
+  filter: brightness(0.95);
+}
+
+.reload-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.diagnostics-card {
+  padding: 18px;
+}
+
+.compact-title-row {
+  margin-bottom: 10px;
+}
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.diagnostic-item {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.diagnostic-item span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.diagnostic-item strong {
+  display: block;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.validation-details {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.validation-details summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.validation-details ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+
+.validation-ok {
+  color: var(--success);
+}
+
+.validation-warn {
+  color: var(--warning);
+}
+
+.validation-error {
+  color: var(--danger);
+}
+
 .control-panel {
   display: grid;
   grid-template-columns: 1fr 2fr 1fr;
@@ -108,7 +223,7 @@ select {
 }
 
 input[type="range"] {
-  accent-color: #2563eb;
+  accent-color: var(--primary);
 }
 
 .range-row {
@@ -142,7 +257,7 @@ input[type="range"] {
 
 .summary-card strong {
   display: block;
-  font-size: clamp(20px, 3vw, 30px);
+  font-size: clamp(19px, 3vw, 30px);
   letter-spacing: -0.04em;
 }
 
@@ -176,6 +291,14 @@ input[type="range"] {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.7;
+}
+
+code {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1px 5px;
+  font-size: 12px;
 }
 
 .chart-wrap {
@@ -227,9 +350,15 @@ td {
   font-size: 12px;
 }
 
+@media (max-width: 1040px) {
+  .diagnostics-grid,
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 920px) {
   .control-panel,
-  .summary-grid,
   .chart-grid {
     grid-template-columns: 1fr;
   }
@@ -240,21 +369,171 @@ td {
   }
 }
 
-.status-card {
-  padding: 14px 18px;
+@media (max-width: 640px) {
+  .status-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reload-button {
+    width: 100%;
+  }
+
+  .diagnostics-grid,
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Step 5 additions: portfolio composition detail */
+.snapshot-control-group {
+  gap: 9px;
+}
+
+.quick-snapshot-buttons {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.status-card strong {
+.quick-snapshot-buttons button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 10px;
+}
+
+.quick-snapshot-buttons button:hover,
+.quick-snapshot-buttons button.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.portfolio-card {
+  display: grid;
+  gap: 12px;
+}
+
+.snapshot-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.mini-stat {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px;
+  min-width: 0;
+}
+
+.mini-stat span {
   display: block;
-  margin-bottom: 4px;
-  font-size: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  margin-bottom: 5px;
 }
 
-.status-card p {
-  margin: 0;
+.mini-stat strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.composition-tools {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.checkbox-label {
+  align-items: center;
   color: var(--muted);
-  line-height: 1.6;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.checkbox-label input {
+  accent-color: var(--primary);
+}
+
+.pie-chart-wrap {
+  height: 330px;
+}
+
+.composition-detail-card {
+  padding: 20px;
+}
+
+.composition-table tbody tr:first-child td {
+  font-weight: 800;
+}
+
+.composition-share-cell {
+  min-width: 150px;
+}
+
+.share-bar {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 54px;
+}
+
+.share-track {
+  background: var(--surface-soft);
+  border-radius: 999px;
+  height: 9px;
+  overflow: hidden;
+}
+
+.share-fill {
+  background: var(--primary);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+}
+
+.share-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.negative-value {
+  color: var(--danger);
+}
+
+.positive-value {
+  color: var(--success);
+}
+
+@media (max-width: 1040px) {
+  .snapshot-mini-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .quick-snapshot-buttons button {
+    flex: 1 1 calc(25% - 6px);
+  }
+
+  .composition-tools {
+    justify-content: flex-start;
+  }
 }

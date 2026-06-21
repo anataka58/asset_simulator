@@ -1,6 +1,6 @@
-// Step 3: Google Sheets CSV connection version
+// Step 5: Portfolio composition detail version
 // Data flow:
-//   config.js -> CSV URLs -> fetch CSV -> normalize rows -> simulate -> render charts
+//   config.js -> CSV URLs -> fetch CSV -> normalize rows -> validate -> simulate -> render charts
 
 const fallbackAssets = [
   {
@@ -10,11 +10,13 @@ const fallbackAssets = [
     asset_type: "mutual_fund",
     value_currency: "JPY",
     exposure_currency: "USD",
+    account_type: "nisa_growth",
     current_value: 550000,
     current_principal: 550000,
     expected_return_annual: 5,
     target_weight: 0.7,
     monthly_contribution: 110000,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -24,11 +26,13 @@ const fallbackAssets = [
     asset_type: "mutual_fund",
     value_currency: "JPY",
     exposure_currency: "USD",
+    account_type: "nisa_growth",
     current_value: 500000,
     current_principal: 360000,
     expected_return_annual: 5,
     target_weight: 0.1,
     monthly_contribution: 20000,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -38,11 +42,13 @@ const fallbackAssets = [
     asset_type: "mutual_fund",
     value_currency: "JPY",
     exposure_currency: "USD",
+    account_type: "nisa_growth",
     current_value: 130000,
     current_principal: 130000,
     expected_return_annual: 2.5,
     target_weight: 0.05,
     monthly_contribution: 20000,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -52,11 +58,13 @@ const fallbackAssets = [
     asset_type: "mutual_fund",
     value_currency: "JPY",
     exposure_currency: "JPY",
+    account_type: "nisa_growth",
     current_value: 10000,
     current_principal: 10000,
     expected_return_annual: 5,
     target_weight: 0.1,
     monthly_contribution: 20000,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -66,11 +74,13 @@ const fallbackAssets = [
     asset_type: "cash",
     value_currency: "JPY",
     exposure_currency: "JPY",
+    account_type: "cash",
     current_value: 500000,
     current_principal: 500000,
     expected_return_annual: 0,
     target_weight: 0.05,
     monthly_contribution: 0,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -80,11 +90,13 @@ const fallbackAssets = [
     asset_type: "mutual_fund",
     value_currency: "JPY",
     exposure_currency: "USD",
+    account_type: "dc",
     current_value: 300000,
     current_principal: 250000,
     expected_return_annual: 5,
     target_weight: 0,
     monthly_contribution: 30000,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -94,11 +106,13 @@ const fallbackAssets = [
     asset_type: "stock",
     value_currency: "JPY",
     exposure_currency: "JPY",
+    account_type: "taxable",
     current_value: 155000,
     current_principal: 125500,
     expected_return_annual: 4,
     target_weight: 0,
     monthly_contribution: 30000,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -108,11 +122,13 @@ const fallbackAssets = [
     asset_type: "stock",
     value_currency: "JPY",
     exposure_currency: "JPY",
+    account_type: "taxable",
     current_value: 260000,
     current_principal: 165000,
     expected_return_annual: 4,
     target_weight: 0,
     monthly_contribution: 0,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -122,11 +138,13 @@ const fallbackAssets = [
     asset_type: "stock",
     value_currency: "JPY",
     exposure_currency: "JPY",
+    account_type: "taxable",
     current_value: 169000,
     current_principal: 175000,
     expected_return_annual: 4,
     target_weight: 0,
     monthly_contribution: 0,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -136,11 +154,13 @@ const fallbackAssets = [
     asset_type: "stock",
     value_currency: "JPY",
     exposure_currency: "JPY",
+    account_type: "taxable",
     current_value: 14400,
     current_principal: 15200,
     expected_return_annual: 4,
     target_weight: 0,
     monthly_contribution: 0,
+    has_monthly_contribution: true,
     include: true
   },
   {
@@ -150,11 +170,13 @@ const fallbackAssets = [
     asset_type: "stock",
     value_currency: "JPY",
     exposure_currency: "USD",
+    account_type: "taxable",
     current_value: 29800,
     current_principal: 26400,
     expected_return_annual: 4,
     target_weight: 0,
     monthly_contribution: 0,
+    has_monthly_contribution: true,
     include: true
   }
 ];
@@ -166,7 +188,8 @@ const fallbackSettings = {
   default_expected_return: 3,
   snapshot_month: 60,
   contribution_timing: "beginning",
-  display_interval: "yearly"
+  display_interval: "yearly",
+  include_emergency_cash: true
 };
 
 const fallbackScenarios = [
@@ -215,10 +238,24 @@ const labelMap = {
   japan_equity: "日本株式",
   gold: "ゴールド",
   cash: "現金",
+  bond: "債券",
+  crypto: "暗号資産",
   mutual_fund: "投資信託",
   stock: "個別株",
+  etf: "ETF",
+  index: "指数",
+  nisa_growth: "NISA成長投資枠",
+  nisa_tsumitate: "NISAつみたて投資枠",
+  taxable: "特定/一般口座",
+  dc: "企業DC",
   JPY: "JPY",
   USD: "USD"
+};
+
+const displayIntervalLabelMap = {
+  monthly: "月次",
+  quarterly: "四半期",
+  yearly: "年次"
 };
 
 let assets = [];
@@ -227,6 +264,8 @@ let scenarios = [];
 let assetTrendChart;
 let portfolioPieChart;
 let latestResults = [];
+let latestValidation = null;
+let controlsInitialized = false;
 
 const yenFormatter = new Intl.NumberFormat("ja-JP", {
   style: "currency",
@@ -239,50 +278,91 @@ const compactYenFormatter = new Intl.NumberFormat("ja-JP", {
   maximumFractionDigits: 1
 });
 
-function setStatus(message, isError = false) {
+function setStatus(message, type = "normal") {
   const element = document.getElementById("dataSourceStatus");
   if (!element) return;
   element.textContent = message;
-  element.style.color = isError ? "#b91c1c" : "";
+  const colors = {
+    normal: "",
+    success: "#047857",
+    warning: "#b45309",
+    error: "#b91c1c"
+  };
+  element.style.color = colors[type] || "";
+}
+
+function setLastLoadedAt(date) {
+  const element = document.getElementById("lastLoadedAt");
+  if (!element) return;
+  if (!date) {
+    element.textContent = "最終読込：-";
+    return;
+  }
+  element.textContent = `最終読込：${date.toLocaleString("ja-JP")}`;
 }
 
 function cleanString(value) {
   if (value === null || value === undefined) return "";
-  return String(value).trim();
+  return String(value).replace(/^\uFEFF/, "").trim();
 }
 
-function toNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
+function normalizeHeader(value) {
+  return cleanString(value)
+    .toLowerCase()
+    .replace(/[\s\-]+/g, "_")
+    .replace(/__+/g, "_");
+}
 
-  const cleaned = String(value)
+function isBlank(value) {
+  return cleanString(value) === "";
+}
+
+function toHalfWidthNumberText(value) {
+  return String(value)
+    .replace(/[０-９]/g, char => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
+    .replace(/[．]/g, ".")
+    .replace(/[，]/g, ",")
+    .replace(/[−–—]/g, "-")
+    .replace(/[％]/g, "%");
+}
+
+function toNullableNumber(value) {
+  if (value === null || value === undefined) return null;
+  const text = cleanString(toHalfWidthNumberText(value));
+  if (text === "" || text === "-" || text === "—" || text === "N/A") return null;
+
+  const cleaned = text
     .replace(/[￥¥,\s]/g, "")
     .replace(/%$/g, "")
     .trim();
 
   const numeric = Number(cleaned);
-  return Number.isFinite(numeric) ? numeric : fallback;
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
-function toNullableNumber(value) {
-  const cleaned = cleanString(value);
-  if (cleaned === "") return null;
-  return toNumber(cleaned, null);
+function toNumber(value, fallback = 0) {
+  const numeric = toNullableNumber(value);
+  return numeric === null ? fallback : numeric;
 }
 
 function toBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
   const text = cleanString(value).toLowerCase();
-  if (["true", "yes", "y", "1"].includes(text)) return true;
-  if (["false", "no", "n", "0"].includes(text)) return false;
+  if (["true", "yes", "y", "1", "on", "○", "〇", "はい", "有", "有効"].includes(text)) return true;
+  if (["false", "no", "n", "0", "off", "×", "いいえ", "無", "無効"].includes(text)) return false;
   return fallback;
 }
 
 function formatYen(value) {
-  return yenFormatter.format(Math.round(value));
+  return yenFormatter.format(Math.round(toNumber(value, 0)));
 }
 
 function formatPercent(value) {
-  return `${value.toFixed(1)}%`;
+  return `${toNumber(value, 0).toFixed(1)}%`;
+}
+
+function formatWeight(value) {
+  return `${(toNumber(value, 0) * 100).toFixed(1)}%`;
 }
 
 function addMonths(date, months) {
@@ -305,13 +385,13 @@ function getSnapshotText(month) {
 
 function isConfiguredUrl(url) {
   const text = cleanString(url);
-  return text !== "" && text.startsWith("http") && !text.includes("PASTE_");
+  return text !== "" && text.startsWith("http") && !text.includes("PASTE_") && !text.includes("ここに");
 }
 
 function normalizeRowKeys(row) {
   const normalized = {};
   for (const [key, value] of Object.entries(row)) {
-    normalized[cleanString(key)] = cleanString(value);
+    normalized[normalizeHeader(key)] = cleanString(value);
   }
   return normalized;
 }
@@ -339,21 +419,27 @@ async function loadCsv(url, label) {
 function normalizeAssets(rows) {
   return rows
     .filter(row => cleanString(row.asset_id) !== "")
-    .map(row => ({
-      asset_id: cleanString(row.asset_id),
-      asset_name: cleanString(row.asset_name),
-      asset_class: cleanString(row.asset_class),
-      asset_type: cleanString(row.asset_type),
-      value_currency: cleanString(row.value_currency || row.currency || "JPY"),
-      exposure_currency: cleanString(row.exposure_currency || row.value_currency || row.currency || "JPY"),
-      account_type: cleanString(row.account_type),
-      current_value: toNumber(row.current_value, 0),
-      current_principal: toNumber(row.current_principal, 0),
-      expected_return_annual: toNumber(row.expected_return_annual, 0),
-      target_weight: toNumber(row.target_weight, 0),
-      monthly_contribution: toNumber(row.monthly_contribution, 0),
-      include: toBoolean(row.include, true)
-    }));
+    .map(row => {
+      const monthlyContributionIsFilled = !isBlank(row.monthly_contribution);
+      const expectedReturnIsFilled = !isBlank(row.expected_return_annual);
+
+      return {
+        asset_id: cleanString(row.asset_id),
+        asset_name: cleanString(row.asset_name || row.asset_id),
+        asset_class: cleanString(row.asset_class || "unknown"),
+        asset_type: cleanString(row.asset_type || "unknown"),
+        value_currency: cleanString(row.value_currency || row.currency || "JPY"),
+        exposure_currency: cleanString(row.exposure_currency || row.value_currency || row.currency || "JPY"),
+        account_type: cleanString(row.account_type || "unspecified"),
+        current_value: toNumber(row.current_value, 0),
+        current_principal: toNumber(row.current_principal, 0),
+        expected_return_annual: expectedReturnIsFilled ? toNumber(row.expected_return_annual, 0) : null,
+        target_weight: toNumber(row.target_weight, 0),
+        monthly_contribution: monthlyContributionIsFilled ? toNumber(row.monthly_contribution, 0) : null,
+        has_monthly_contribution: monthlyContributionIsFilled,
+        include: toBoolean(row.include, true)
+      };
+    });
 }
 
 function normalizeSettings(rows) {
@@ -365,14 +451,19 @@ function normalizeSettings(rows) {
     nextSettings[key] = cleanString(row.value);
   }
 
+  const displayInterval = cleanString(nextSettings.display_interval || fallbackSettings.display_interval).toLowerCase();
+  const safeDisplayInterval = ["monthly", "quarterly", "yearly"].includes(displayInterval)
+    ? displayInterval
+    : "yearly";
+
   return {
     start_date: nextSettings.start_date || fallbackSettings.start_date,
-    simulation_years: toNumber(nextSettings.simulation_years, fallbackSettings.simulation_years),
+    simulation_years: Math.max(1, toNumber(nextSettings.simulation_years, fallbackSettings.simulation_years)),
     monthly_total_contribution: toNumber(nextSettings.monthly_total_contribution, fallbackSettings.monthly_total_contribution),
     default_expected_return: toNumber(nextSettings.default_expected_return, fallbackSettings.default_expected_return),
     snapshot_month: toNumber(nextSettings.snapshot_month, fallbackSettings.snapshot_month),
     contribution_timing: nextSettings.contribution_timing || fallbackSettings.contribution_timing,
-    display_interval: nextSettings.display_interval || fallbackSettings.display_interval,
+    display_interval: safeDisplayInterval,
     include_emergency_cash: toBoolean(nextSettings.include_emergency_cash, true)
   };
 }
@@ -394,6 +485,144 @@ function normalizeScenarios(rows) {
   return fallbackScenarios;
 }
 
+function isEmergencyCash(asset) {
+  const id = cleanString(asset.asset_id).toLowerCase();
+  const name = cleanString(asset.asset_name).toLowerCase();
+  const accountType = cleanString(asset.account_type).toLowerCase();
+  return id.includes("emergency") || name.includes("生活防衛") || accountType.includes("emergency");
+}
+
+function getIncludedAssets(assetList, currentSettings) {
+  return assetList.filter(asset => {
+    if (asset.include !== true) return false;
+    if (currentSettings.include_emergency_cash === false && isEmergencyCash(asset)) return false;
+    return true;
+  });
+}
+
+function getMonthlyContribution(asset, currentSettings) {
+  if (asset.has_monthly_contribution) {
+    return toNumber(asset.monthly_contribution, 0);
+  }
+
+  const targetWeight = toNumber(asset.target_weight, 0);
+  return toNumber(currentSettings.monthly_total_contribution, 0) * targetWeight;
+}
+
+function getAnnualReturn(asset, currentSettings) {
+  if (asset.expected_return_annual !== null && asset.expected_return_annual !== undefined) {
+    return toNumber(asset.expected_return_annual, 0);
+  }
+  return toNumber(currentSettings.default_expected_return, 0);
+}
+
+function getMonthlyRate(asset, scenario, currentSettings) {
+  const baseAnnualReturn = getAnnualReturn(asset, currentSettings);
+  const adjustedAnnualReturn = Math.max(
+    -99,
+    baseAnnualReturn + toNumber(scenario.expected_return_adjustment, 0)
+  );
+  return Math.pow(1 + adjustedAnnualReturn / 100, 1 / 12) - 1;
+}
+
+function buildValidation(assetList, currentSettings, scenarioList) {
+  const messages = [];
+  const included = getIncludedAssets(assetList, currentSettings);
+  const ids = new Map();
+  const duplicateIds = [];
+
+  for (const asset of assetList) {
+    const count = ids.get(asset.asset_id) || 0;
+    ids.set(asset.asset_id, count + 1);
+    if (count === 1) duplicateIds.push(asset.asset_id);
+
+    if (asset.current_value < 0) {
+      messages.push({ type: "error", text: `${asset.asset_id}: current_value がマイナスです。` });
+    }
+    if (asset.current_principal < 0) {
+      messages.push({ type: "error", text: `${asset.asset_id}: current_principal がマイナスです。` });
+    }
+    if (!asset.asset_class || asset.asset_class === "unknown") {
+      messages.push({ type: "warning", text: `${asset.asset_id}: asset_class が空欄です。円グラフ分類で unknown になります。` });
+    }
+    if (asset.expected_return_annual === null) {
+      messages.push({ type: "ok", text: `${asset.asset_id}: expected_return_annual 空欄のため default_expected_return ${currentSettings.default_expected_return}% を使用します。` });
+    }
+  }
+
+  if (duplicateIds.length > 0) {
+    messages.push({ type: "error", text: `asset_id が重複しています: ${duplicateIds.join(", ")}` });
+  }
+
+  if (scenarioList.filter(item => item.include).length === 0) {
+    messages.push({ type: "warning", text: "include=TRUE の Scenario がありません。fallback の基本シナリオを使います。" });
+  }
+
+  const currentValue = included.reduce((sum, asset) => sum + toNumber(asset.current_value, 0), 0);
+  const currentPrincipal = included.reduce((sum, asset) => sum + toNumber(asset.current_principal, 0), 0);
+  const monthlyContribution = included.reduce((sum, asset) => sum + getMonthlyContribution(asset, currentSettings), 0);
+  const targetWeightSum = included.reduce((sum, asset) => sum + toNumber(asset.target_weight, 0), 0);
+  const blankContributionCount = included.filter(asset => !asset.has_monthly_contribution).length;
+  const directContributionCount = included.filter(asset => asset.has_monthly_contribution).length;
+  const monthlyTotalSetting = toNumber(currentSettings.monthly_total_contribution, 0);
+
+  if (blankContributionCount > 0 && Math.abs(targetWeightSum - 1) > 0.001) {
+    messages.push({
+      type: "warning",
+      text: `monthly_contribution 空欄の資産がありますが、target_weight 合計が ${formatWeight(targetWeightSum)} です。配分計算を使うなら100%に近づけてください。`
+    });
+  }
+
+  if (monthlyTotalSetting > 0 && Math.abs(monthlyContribution - monthlyTotalSetting) >= 1) {
+    messages.push({
+      type: "warning",
+      text: `計算上の毎月積立額 ${formatYen(monthlyContribution)} と Settings.monthly_total_contribution ${formatYen(monthlyTotalSetting)} が一致していません。直接入力の monthly_contribution が優先されています。`
+    });
+  }
+
+  if (messages.filter(item => item.type === "error" || item.type === "warning").length === 0) {
+    messages.push({ type: "ok", text: "読み込みチェックは問題ありません。" });
+  }
+
+  return {
+    rowCount: assetList.length,
+    includedCount: included.length,
+    currentValue,
+    currentPrincipal,
+    monthlyContribution,
+    targetWeightSum,
+    blankContributionCount,
+    directContributionCount,
+    messages
+  };
+}
+
+function renderDiagnostics(validation) {
+  latestValidation = validation;
+  const diagnostics = document.getElementById("sheetDiagnostics");
+  const validationList = document.getElementById("validationList");
+  if (!diagnostics || !validationList || !validation) return;
+
+  const items = [
+    ["Assets行数", `${validation.rowCount}件`],
+    ["表示対象Assets", `${validation.includedCount}件`],
+    ["現在評価額合計", formatYen(validation.currentValue)],
+    ["現在元本合計", formatYen(validation.currentPrincipal)],
+    ["毎月積立額", formatYen(validation.monthlyContribution)],
+    ["target_weight合計", formatWeight(validation.targetWeightSum)],
+    ["直接積立入力", `${validation.directContributionCount}件`],
+    ["配分計算入力", `${validation.blankContributionCount}件`]
+  ];
+
+  diagnostics.innerHTML = items
+    .map(([label, value]) => `<div class="diagnostic-item"><span>${label}</span><strong>${value}</strong></div>`)
+    .join("");
+
+  validationList.innerHTML = validation.messages
+    .map(item => `<li class="validation-${item.type}">${item.text}</li>`)
+    .join("");
+}
+
 async function loadData() {
   const config = window.ASSET_SIMULATOR_CONFIG || {};
   const googleSheets = config.googleSheets || {};
@@ -409,12 +638,15 @@ async function loadData() {
     assets = fallbackAssets;
     settings = fallbackSettings;
     scenarios = fallbackScenarios;
-    setStatus("config.jsにCSV URLが未設定です。現在は内蔵サンプルデータで表示しています。");
+    const validation = buildValidation(assets, settings, scenarios);
+    renderDiagnostics(validation);
+    setStatus("config.jsにCSV URLが未設定です。現在は内蔵サンプルデータで表示しています。", "warning");
+    setLastLoadedAt(new Date());
     return;
   }
 
   try {
-    setStatus("GoogleスプレッドシートからCSVを読み込んでいます...");
+    setStatus("GoogleスプレッドシートからCSVを読み込んでいます...", "normal");
     const [assetRows, settingRows, scenarioRows] = await Promise.all([
       loadCsv(urls.assets, "Assets"),
       loadCsv(urls.settings, "Settings"),
@@ -429,40 +661,31 @@ async function loadData() {
       throw new Error("Assets CSVに有効なasset_idがありません。");
     }
 
-    setStatus(`Googleスプレッドシート接続中：Assets ${assets.length}件、Scenario ${scenarios.length}件を読み込みました。`);
+    const validation = buildValidation(assets, settings, scenarios);
+    renderDiagnostics(validation);
+
+    const hasSeriousIssue = validation.messages.some(item => item.type === "error");
+    const hasWarning = validation.messages.some(item => item.type === "warning");
+    const statusType = hasSeriousIssue ? "error" : hasWarning ? "warning" : "success";
+
+    setStatus(`Googleスプレッドシート接続中：Assets ${assets.length}件、Scenario ${scenarios.length}件を読み込みました。`, statusType);
+    setLastLoadedAt(new Date());
   } catch (error) {
     console.error(error);
     assets = fallbackAssets;
     settings = fallbackSettings;
     scenarios = fallbackScenarios;
-    setStatus(`CSV読み込みに失敗しました。内蔵サンプルデータで表示しています。${error.message}`, true);
+    const validation = buildValidation(assets, settings, scenarios);
+    renderDiagnostics(validation);
+    setStatus(`CSV読み込みに失敗しました。内蔵サンプルデータで表示しています。${error.message}`, "error");
+    setLastLoadedAt(new Date());
   }
-}
-
-function getMonthlyContribution(asset, currentSettings) {
-  const direct = toNumber(asset.monthly_contribution, 0);
-  if (direct !== 0) return direct;
-
-  const targetWeight = toNumber(asset.target_weight, 0);
-  return toNumber(currentSettings.monthly_total_contribution, 0) * targetWeight;
-}
-
-function getMonthlyRate(asset, scenario, currentSettings) {
-  const baseAnnualReturn = toNumber(
-    asset.expected_return_annual,
-    toNumber(currentSettings.default_expected_return, 0)
-  );
-  const adjustedAnnualReturn = Math.max(
-    -99,
-    baseAnnualReturn + toNumber(scenario.expected_return_adjustment, 0)
-  );
-  return Math.pow(1 + adjustedAnnualReturn / 100, 1 / 12) - 1;
 }
 
 function simulatePortfolio(assetList, currentSettings, scenario) {
   const months = toNumber(currentSettings.simulation_years, 30) * 12;
   const startDate = new Date(currentSettings.start_date);
-  const includedAssets = assetList.filter(asset => asset.include === true);
+  const includedAssets = getIncludedAssets(assetList, currentSettings);
 
   let current = includedAssets.map(asset => ({
     ...asset,
@@ -487,6 +710,7 @@ function simulatePortfolio(assetList, currentSettings, scenario) {
         asset_type: asset.asset_type,
         value_currency: asset.value_currency,
         exposure_currency: asset.exposure_currency,
+        account_type: asset.account_type,
         principal: asset.principal,
         value: asset.value,
         contribution: month === 0 ? 0 : asset.monthlyContribution
@@ -555,44 +779,109 @@ function groupByMonth(rows) {
   }));
 }
 
-function groupSnapshot(rows, selectedMonth, key) {
+function getGroupLabel(row, key) {
+  const rawLabel = row[key] || "unknown";
+  return labelMap[rawLabel] || rawLabel;
+}
+
+function buildSnapshotGroups(rows, selectedMonth, key) {
   const targetRows = rows.filter(row => row.month === selectedMonth);
   const grouped = new Map();
 
   for (const row of targetRows) {
-    const rawLabel = row[key] || "unknown";
-    const label = labelMap[rawLabel] || rawLabel;
+    const label = getGroupLabel(row, key);
 
-    if (!grouped.has(label)) grouped.set(label, 0);
-    grouped.set(label, grouped.get(label) + row.value);
+    if (!grouped.has(label)) {
+      grouped.set(label, {
+        label,
+        value: 0,
+        principal: 0,
+        assetCount: 0
+      });
+    }
+
+    const item = grouped.get(label);
+    item.value += row.value;
+    item.principal += row.principal;
+    item.assetCount += 1;
   }
 
-  return Array.from(grouped.entries())
-    .map(([label, value]) => ({ label, value }))
+  const totalValue = Array.from(grouped.values()).reduce((sum, item) => sum + item.value, 0);
+
+  return Array.from(grouped.values())
     .filter(item => item.value > 0)
+    .map(item => ({
+      ...item,
+      profit: item.value - item.principal,
+      profitRate: item.principal === 0 ? 0 : (item.value - item.principal) / item.principal * 100,
+      share: totalValue === 0 ? 0 : item.value / totalValue * 100
+    }))
     .sort((a, b) => b.value - a.value);
 }
 
-function getYearlyTrendData(monthlyTotals) {
+function combineSmallSnapshotGroups(snapshotGroups, thresholdPercent = 1) {
+  const smallGroups = snapshotGroups.filter(item => item.share > 0 && item.share < thresholdPercent);
+
+  if (smallGroups.length <= 1) return snapshotGroups;
+
+  const largeGroups = snapshotGroups.filter(item => item.share >= thresholdPercent);
+  const other = smallGroups.reduce(
+    (sum, item) => ({
+      label: "その他",
+      value: sum.value + item.value,
+      principal: sum.principal + item.principal,
+      assetCount: sum.assetCount + item.assetCount
+    }),
+    { label: "その他", value: 0, principal: 0, assetCount: 0 }
+  );
+
+  other.profit = other.value - other.principal;
+  other.profitRate = other.principal === 0 ? 0 : other.profit / other.principal * 100;
+
+  const totalValue = snapshotGroups.reduce((sum, item) => sum + item.value, 0);
+  const combined = [...largeGroups, other]
+    .map(item => ({
+      ...item,
+      share: totalValue === 0 ? 0 : item.value / totalValue * 100
+    }))
+    .sort((a, b) => b.value - a.value);
+
+  return combined;
+}
+
+function getTrendData(monthlyTotals) {
+  const interval = settings.display_interval || "yearly";
+  if (interval === "monthly") return monthlyTotals;
+  if (interval === "quarterly") return monthlyTotals.filter(item => item.month % 3 === 0);
   return monthlyTotals.filter(item => item.month % 12 === 0);
 }
 
+function getTrendLabel(item) {
+  if (item.month === 0) return "現在";
+  if ((settings.display_interval || "yearly") === "yearly") return `${item.month / 12}年後`;
+  return item.dateLabel;
+}
+
 function updateSummaryCards(monthlyTotals, selectedMonth) {
-  const current = monthlyTotals.find(item => item.month === 0) || { value: 0 };
-  const snapshot = monthlyTotals.find(item => item.month === selectedMonth) || monthlyTotals[0] || { value: 0, profit: 0 };
-  const totalMonthlyContribution = assets
-    .filter(asset => asset.include === true)
+  const current = monthlyTotals.find(item => item.month === 0) || { value: 0, principal: 0 };
+  const snapshot = monthlyTotals.find(item => item.month === selectedMonth) || monthlyTotals[0] || { value: 0, principal: 0, profit: 0, profitRate: 0 };
+  const totalMonthlyContribution = getIncludedAssets(assets, settings)
     .reduce((sum, asset) => sum + getMonthlyContribution(asset, settings), 0);
 
   document.getElementById("currentValue").textContent = formatYen(current.value);
+  document.getElementById("currentPrincipal").textContent = formatYen(current.principal);
   document.getElementById("monthlyContribution").textContent = formatYen(totalMonthlyContribution);
   document.getElementById("snapshotValue").textContent = formatYen(snapshot.value);
+  document.getElementById("snapshotPrincipal").textContent = formatYen(snapshot.principal);
   document.getElementById("snapshotProfit").textContent = formatYen(snapshot.profit);
+  document.getElementById("snapshotProfitRate").textContent = formatPercent(snapshot.profitRate);
+  document.getElementById("displayIntervalLabel").textContent = displayIntervalLabelMap[settings.display_interval] || settings.display_interval || "年次";
 }
 
 function updateSummaryTable(monthlyTotals) {
   const maxMonth = toNumber(settings.simulation_years, 30) * 12;
-  const checkpoints = [0, 12, 36, 60, 120, 240, 360, 600].filter(month => month <= maxMonth);
+  const baseCheckpoints = [0, 12, 36, 60, 120, 240, 360, 480, 600];
+  const checkpoints = baseCheckpoints.filter(month => month <= maxMonth);
   const tbody = document.getElementById("summaryTableBody");
   tbody.innerHTML = "";
 
@@ -619,28 +908,77 @@ function updateSummaryTable(monthlyTotals) {
   }
 }
 
-function renderTrendChart(yearlyData) {
+function updatePortfolioSnapshotSummary(snapshotData) {
+  const groupCount = document.getElementById("portfolioGroupCount");
+  const topLabel = document.getElementById("portfolioTopLabel");
+  const topShare = document.getElementById("portfolioTopShare");
+
+  if (!groupCount || !topLabel || !topShare) return;
+
+  const top = snapshotData[0];
+  groupCount.textContent = `${snapshotData.length}件`;
+  topLabel.textContent = top ? top.label : "-";
+  topShare.textContent = top ? formatPercent(top.share) : "-";
+}
+
+function updateCompositionTable(snapshotData) {
+  const tbody = document.getElementById("compositionTableBody");
+  if (!tbody) return;
+
+  tbody.innerHTML = "";
+
+  for (const item of snapshotData) {
+    const tr = document.createElement("tr");
+    const profitClass = item.profit < 0 ? "negative-value" : item.profit > 0 ? "positive-value" : "";
+
+    tr.innerHTML = `
+      <td>${item.label}</td>
+      <td>${formatYen(item.value)}</td>
+      <td class="composition-share-cell">
+        <div class="share-bar">
+          <span class="share-track"><span class="share-fill" style="width: ${Math.max(0, Math.min(100, item.share))}%"></span></span>
+          <span class="share-value">${formatPercent(item.share)}</span>
+        </div>
+      </td>
+      <td>${formatYen(item.principal)}</td>
+      <td class="${profitClass}">${formatYen(item.profit)}</td>
+      <td class="${profitClass}">${formatPercent(item.profitRate)}</td>
+    `;
+
+    tbody.appendChild(tr);
+  }
+}
+
+function updateQuickSnapshotButtons(selectedMonth) {
+  document.querySelectorAll("[data-snapshot-month]").forEach(button => {
+    const month = toNumber(button.dataset.snapshotMonth, -1);
+    button.classList.toggle("is-active", month === selectedMonth);
+    button.disabled = month > toNumber(settings.simulation_years, 30) * 12;
+  });
+}
+
+function renderTrendChart(trendData) {
   const ctx = document.getElementById("assetTrendChart");
 
   if (assetTrendChart) assetTrendChart.destroy();
 
   assetTrendChart = new Chart(ctx, {
     data: {
-      labels: yearlyData.map(item => item.month === 0 ? "現在" : `${item.month / 12}年後`),
+      labels: trendData.map(getTrendLabel),
       datasets: [
         {
           type: "bar",
           label: "評価額",
-          data: yearlyData.map(item => Math.round(item.value)),
+          data: trendData.map(item => Math.round(item.value)),
           borderWidth: 0,
           borderRadius: 8
         },
         {
           type: "line",
           label: "元本",
-          data: yearlyData.map(item => Math.round(item.principal)),
+          data: trendData.map(item => Math.round(item.principal)),
           tension: 0.25,
-          pointRadius: 2,
+          pointRadius: trendData.length > 80 ? 0 : 2,
           borderWidth: 3
         }
       ]
@@ -730,7 +1068,8 @@ function renderPieChart(snapshotData, selectedMonth, mode) {
     asset_name: "銘柄別",
     exposure_currency: "実質通貨別",
     value_currency: "評価通貨別",
-    asset_type: "商品タイプ別"
+    asset_type: "商品タイプ別",
+    account_type: "口座区分別"
   }[mode];
 
   document.getElementById("pieDescription").textContent = `${getSnapshotText(selectedMonth)}の${modeLabel}比率です。`;
@@ -743,48 +1082,108 @@ function updateSnapshotLabels(selectedMonth) {
 }
 
 function updateDashboard() {
-  const scenarioId = document.getElementById("scenarioSelect").value;
-  const scenario = scenarios.find(item => item.scenario_id === scenarioId) || scenarios[0] || fallbackScenarios[0];
-  const selectedMonth = toNumber(document.getElementById("snapshotRange").value, settings.snapshot_month);
-  const pieMode = document.getElementById("pieModeSelect").value;
-
-  latestResults = simulatePortfolio(assets, settings, scenario);
-  const monthlyTotals = groupByMonth(latestResults);
-  const yearlyTrendData = getYearlyTrendData(monthlyTotals);
-  const snapshotData = groupSnapshot(latestResults, selectedMonth, pieMode);
-
-  updateSnapshotLabels(selectedMonth);
-  updateSummaryCards(monthlyTotals, selectedMonth);
-  updateSummaryTable(monthlyTotals);
-  renderTrendChart(yearlyTrendData);
-  renderPieChart(snapshotData, selectedMonth, pieMode);
-}
-
-function initControls() {
   const scenarioSelect = document.getElementById("scenarioSelect");
   const snapshotRange = document.getElementById("snapshotRange");
   const pieModeSelect = document.getElementById("pieModeSelect");
 
-  scenarioSelect.innerHTML = "";
+  const scenarioId = scenarioSelect.value;
+  const scenario = scenarios.find(item => item.scenario_id === scenarioId) || scenarios[0] || fallbackScenarios[0];
+  const selectedMonth = toNumber(snapshotRange.value, settings.snapshot_month);
+  const pieMode = pieModeSelect.value;
 
-  for (const scenario of scenarios.filter(item => item.include)) {
+  latestResults = simulatePortfolio(assets, settings, scenario);
+  const monthlyTotals = groupByMonth(latestResults);
+  const trendData = getTrendData(monthlyTotals);
+  const groupSmallSlicesToggle = document.getElementById("groupSmallSlicesToggle");
+  const shouldGroupSmallSlices = groupSmallSlicesToggle ? groupSmallSlicesToggle.checked : true;
+  const rawSnapshotData = buildSnapshotGroups(latestResults, selectedMonth, pieMode);
+  const snapshotData = shouldGroupSmallSlices
+    ? combineSmallSnapshotGroups(rawSnapshotData)
+    : rawSnapshotData;
+
+  updateSnapshotLabels(selectedMonth);
+  updateSummaryCards(monthlyTotals, selectedMonth);
+  updateSummaryTable(monthlyTotals);
+  updatePortfolioSnapshotSummary(snapshotData);
+  updateCompositionTable(snapshotData);
+  updateQuickSnapshotButtons(selectedMonth);
+  renderTrendChart(trendData);
+  renderPieChart(snapshotData, selectedMonth, pieMode);
+}
+
+function refreshControls() {
+  const scenarioSelect = document.getElementById("scenarioSelect");
+  const snapshotRange = document.getElementById("snapshotRange");
+  const previousScenario = scenarioSelect.value;
+
+  const visibleScenarios = scenarios.filter(item => item.include);
+  const scenarioOptions = visibleScenarios.length > 0 ? visibleScenarios : fallbackScenarios;
+
+  scenarioSelect.innerHTML = "";
+  for (const scenario of scenarioOptions) {
     const option = document.createElement("option");
     option.value = scenario.scenario_id;
     option.textContent = scenario.scenario_name;
     scenarioSelect.appendChild(option);
   }
 
+  const previousStillExists = scenarioOptions.some(item => item.scenario_id === previousScenario);
+  if (previousStillExists) {
+    scenarioSelect.value = previousScenario;
+  }
+
   snapshotRange.max = String(toNumber(settings.simulation_years, 30) * 12);
-  snapshotRange.value = String(toNumber(settings.snapshot_month, 60));
+  snapshotRange.step = "1";
+  const currentValue = toNumber(snapshotRange.value, settings.snapshot_month);
+  const safeValue = Math.min(currentValue, toNumber(snapshotRange.max, 600));
+  snapshotRange.value = String(safeValue || toNumber(settings.snapshot_month, 60));
+}
+
+function initControlsOnce() {
+  if (controlsInitialized) return;
+
+  const scenarioSelect = document.getElementById("scenarioSelect");
+  const snapshotRange = document.getElementById("snapshotRange");
+  const pieModeSelect = document.getElementById("pieModeSelect");
+  const groupSmallSlicesToggle = document.getElementById("groupSmallSlicesToggle");
+  const reloadDataButton = document.getElementById("reloadDataButton");
 
   scenarioSelect.addEventListener("change", updateDashboard);
   snapshotRange.addEventListener("input", updateDashboard);
   pieModeSelect.addEventListener("change", updateDashboard);
+  if (groupSmallSlicesToggle) groupSmallSlicesToggle.addEventListener("change", updateDashboard);
+  document.querySelectorAll("[data-snapshot-month]").forEach(button => {
+    button.addEventListener("click", () => {
+      const maxMonth = toNumber(snapshotRange.max, 600);
+      const targetMonth = Math.min(toNumber(button.dataset.snapshotMonth, 0), maxMonth);
+      snapshotRange.value = String(targetMonth);
+      updateDashboard();
+    });
+  });
+  reloadDataButton.addEventListener("click", reloadDataFromSheet);
+
+  controlsInitialized = true;
+}
+
+async function reloadDataFromSheet() {
+  const button = document.getElementById("reloadDataButton");
+  button.disabled = true;
+  button.textContent = "再読み込み中...";
+
+  try {
+    await loadData();
+    refreshControls();
+    updateDashboard();
+  } finally {
+    button.disabled = false;
+    button.textContent = "シートを再読み込み";
+  }
 }
 
 async function initApp() {
+  initControlsOnce();
   await loadData();
-  initControls();
+  refreshControls();
   updateDashboard();
 }
 

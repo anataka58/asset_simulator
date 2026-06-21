@@ -11,7 +11,7 @@
     <div>
       <p class="eyebrow">Portfolio Management</p>
       <h1>Asset Simulator</h1>
-      <p class="lead">Googleスプレッドシートの Assets / Settings / Scenario を読み込み、将来の資産推移をシミュレーションします。</p>
+      <p class="lead">Googleスプレッドシートの Assets / Settings / Scenario を読み込み、将来の資産推移と任意時点のポートフォリオ内訳を表示します。</p>
     </div>
   </header>
 
@@ -20,7 +20,23 @@
       <div>
         <strong>データ接続</strong>
         <p id="dataSourceStatus">読み込み準備中です。</p>
+        <p id="lastLoadedAt" class="status-subtext">最終読込：-</p>
       </div>
+      <button id="reloadDataButton" class="reload-button" type="button">シートを再読み込み</button>
+    </section>
+
+    <section class="diagnostics-card card">
+      <div class="card-title-row compact-title-row">
+        <div>
+          <h2>読み込みチェック</h2>
+          <p>GoogleスプレッドシートとWeb表示の連動確認用です。</p>
+        </div>
+      </div>
+      <div id="sheetDiagnostics" class="diagnostics-grid"></div>
+      <details class="validation-details">
+        <summary>チェック詳細を開く</summary>
+        <ul id="validationList"></ul>
+      </details>
     </section>
 
     <section class="control-panel card">
@@ -29,12 +45,21 @@
         <select id="scenarioSelect"></select>
       </div>
 
-      <div class="control-group">
+      <div class="control-group snapshot-control-group">
         <label for="snapshotRange">円グラフの時点</label>
-        <input id="snapshotRange" type="range" min="0" max="600" step="12" value="60" />
+        <input id="snapshotRange" type="range" min="0" max="600" step="1" value="60" />
         <div class="range-row">
           <span id="snapshotLabel">5年後</span>
           <span id="snapshotDateLabel">2031-07</span>
+        </div>
+        <div class="quick-snapshot-buttons" aria-label="quick snapshot buttons">
+          <button type="button" data-snapshot-month="0">現在</button>
+          <button type="button" data-snapshot-month="12">1年</button>
+          <button type="button" data-snapshot-month="36">3年</button>
+          <button type="button" data-snapshot-month="60">5年</button>
+          <button type="button" data-snapshot-month="120">10年</button>
+          <button type="button" data-snapshot-month="240">20年</button>
+          <button type="button" data-snapshot-month="360">30年</button>
         </div>
       </div>
 
@@ -46,6 +71,7 @@
           <option value="exposure_currency">実質通貨別</option>
           <option value="value_currency">評価通貨別</option>
           <option value="asset_type">商品タイプ別</option>
+          <option value="account_type">口座区分別</option>
         </select>
       </div>
     </section>
@@ -56,6 +82,10 @@
         <strong id="currentValue">-</strong>
       </article>
       <article class="summary-card card">
+        <p>現在元本</p>
+        <strong id="currentPrincipal">-</strong>
+      </article>
+      <article class="summary-card card">
         <p>毎月積立額</p>
         <strong id="monthlyContribution">-</strong>
       </article>
@@ -64,8 +94,20 @@
         <strong id="snapshotValue">-</strong>
       </article>
       <article class="summary-card card">
+        <p>選択時点の元本</p>
+        <strong id="snapshotPrincipal">-</strong>
+      </article>
+      <article class="summary-card card">
         <p>選択時点の含み益</p>
         <strong id="snapshotProfit">-</strong>
+      </article>
+      <article class="summary-card card">
+        <p>選択時点の含み益率</p>
+        <strong id="snapshotProfitRate">-</strong>
+      </article>
+      <article class="summary-card card">
+        <p>表示間隔</p>
+        <strong id="displayIntervalLabel">-</strong>
       </article>
     </section>
 
@@ -74,7 +116,7 @@
         <div class="card-title-row">
           <div>
             <h2>資産推移</h2>
-            <p>評価額を棒グラフ、元本を折れ線で表示します。</p>
+            <p>評価額を棒グラフ、元本を折れ線で表示します。表示間隔は Settings の <code>display_interval</code> に連動します。</p>
           </div>
         </div>
         <div class="chart-wrap large">
@@ -82,17 +124,64 @@
         </div>
       </article>
 
-      <article class="card chart-card">
+      <article class="card chart-card portfolio-card">
         <div class="card-title-row">
           <div>
             <h2>ポートフォリオ構成</h2>
             <p id="pieDescription">選択時点の資産クラス別比率です。</p>
           </div>
         </div>
-        <div class="chart-wrap">
+
+        <div class="snapshot-mini-grid" aria-label="portfolio snapshot summary">
+          <div class="mini-stat">
+            <span>分類数</span>
+            <strong id="portfolioGroupCount">-</strong>
+          </div>
+          <div class="mini-stat">
+            <span>最大項目</span>
+            <strong id="portfolioTopLabel">-</strong>
+          </div>
+          <div class="mini-stat">
+            <span>最大比率</span>
+            <strong id="portfolioTopShare">-</strong>
+          </div>
+        </div>
+
+        <div class="composition-tools">
+          <label class="checkbox-label" for="groupSmallSlicesToggle">
+            <input id="groupSmallSlicesToggle" type="checkbox" checked />
+            1%未満を「その他」にまとめる
+          </label>
+        </div>
+
+        <div class="chart-wrap pie-chart-wrap">
           <canvas id="portfolioPieChart"></canvas>
         </div>
       </article>
+    </section>
+
+    <section class="card table-card composition-detail-card">
+      <div class="card-title-row">
+        <div>
+          <h2>選択時点のポートフォリオ内訳</h2>
+          <p>円グラフと同じ分類で、評価額・比率・元本・含み益を確認できます。</p>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="composition-table">
+          <thead>
+            <tr>
+              <th>分類</th>
+              <th>評価額</th>
+              <th>比率</th>
+              <th>元本</th>
+              <th>含み益</th>
+              <th>含み益率</th>
+            </tr>
+          </thead>
+          <tbody id="compositionTableBody"></tbody>
+        </table>
+      </div>
     </section>
 
     <section class="card table-card">
@@ -120,7 +209,7 @@
   </main>
 
   <footer class="app-footer">
-    <p>Step 3: Google Sheets CSV connection version.</p>
+    <p>Step 5: Portfolio composition detail version.</p>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
