@@ -1,8 +1,8 @@
-// Step 2: fixed data version
-// Source: Asset simulator.xlsx / Assets, Settings, Scenario
-// Next step: replace these constants with Google Sheets CSV loading.
+// Step 3: Google Sheets CSV connection version
+// Data flow:
+//   config.js -> CSV URLs -> fetch CSV -> normalize rows -> simulate -> render charts
 
-const assets = [
+const fallbackAssets = [
   {
     asset_id: "ACWI",
     asset_name: "emaxis slim all country",
@@ -159,7 +159,7 @@ const assets = [
   }
 ];
 
-const settings = {
+const fallbackSettings = {
   start_date: "2026-07-01",
   simulation_years: 50,
   monthly_total_contribution: 230000,
@@ -169,7 +169,7 @@ const settings = {
   display_interval: "yearly"
 };
 
-const scenarios = [
+const fallbackScenarios = [
   {
     scenario_id: "base",
     scenario_name: "基本シナリオ",
@@ -221,6 +221,9 @@ const labelMap = {
   USD: "USD"
 };
 
+let assets = [];
+let settings = {};
+let scenarios = [];
 let assetTrendChart;
 let portfolioPieChart;
 let latestResults = [];
@@ -236,9 +239,42 @@ const compactYenFormatter = new Intl.NumberFormat("ja-JP", {
   maximumFractionDigits: 1
 });
 
+function setStatus(message, isError = false) {
+  const element = document.getElementById("dataSourceStatus");
+  if (!element) return;
+  element.textContent = message;
+  element.style.color = isError ? "#b91c1c" : "";
+}
+
+function cleanString(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
 function toNumber(value, fallback = 0) {
-  const numeric = Number(value);
+  if (value === null || value === undefined || value === "") return fallback;
+
+  const cleaned = String(value)
+    .replace(/[￥¥,\s]/g, "")
+    .replace(/%$/g, "")
+    .trim();
+
+  const numeric = Number(cleaned);
   return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function toNullableNumber(value) {
+  const cleaned = cleanString(value);
+  if (cleaned === "") return null;
+  return toNumber(cleaned, null);
+}
+
+function toBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const text = cleanString(value).toLowerCase();
+  if (["true", "yes", "y", "1"].includes(text)) return true;
+  if (["false", "no", "n", "0"].includes(text)) return false;
+  return fallback;
 }
 
 function formatYen(value) {
@@ -267,19 +303,154 @@ function getSnapshotText(month) {
   return `${month}か月後`;
 }
 
-function getMonthlyContribution(asset, settings) {
+function isConfiguredUrl(url) {
+  const text = cleanString(url);
+  return text !== "" && text.startsWith("http") && !text.includes("PASTE_");
+}
+
+function normalizeRowKeys(row) {
+  const normalized = {};
+  for (const [key, value] of Object.entries(row)) {
+    normalized[cleanString(key)] = cleanString(value);
+  }
+  return normalized;
+}
+
+async function loadCsv(url, label) {
+  const requestUrl = `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`;
+  const response = await fetch(requestUrl, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`${label} CSVを取得できませんでした。HTTP ${response.status}`);
+  }
+
+  const csvText = await response.text();
+  const parsed = Papa.parse(csvText, {
+    header: true,
+    skipEmptyLines: true
+  });
+
+  if (parsed.errors.length > 0) {
+    console.warn(`${label} CSV parse warnings`, parsed.errors);
+  }
+
+  return parsed.data.map(normalizeRowKeys);
+}
+
+function normalizeAssets(rows) {
+  return rows
+    .filter(row => cleanString(row.asset_id) !== "")
+    .map(row => ({
+      asset_id: cleanString(row.asset_id),
+      asset_name: cleanString(row.asset_name),
+      asset_class: cleanString(row.asset_class),
+      asset_type: cleanString(row.asset_type),
+      value_currency: cleanString(row.value_currency || row.currency || "JPY"),
+      exposure_currency: cleanString(row.exposure_currency || row.value_currency || row.currency || "JPY"),
+      account_type: cleanString(row.account_type),
+      current_value: toNumber(row.current_value, 0),
+      current_principal: toNumber(row.current_principal, 0),
+      expected_return_annual: toNumber(row.expected_return_annual, 0),
+      target_weight: toNumber(row.target_weight, 0),
+      monthly_contribution: toNumber(row.monthly_contribution, 0),
+      include: toBoolean(row.include, true)
+    }));
+}
+
+function normalizeSettings(rows) {
+  const nextSettings = {};
+
+  for (const row of rows) {
+    const key = cleanString(row.key);
+    if (key === "") continue;
+    nextSettings[key] = cleanString(row.value);
+  }
+
+  return {
+    start_date: nextSettings.start_date || fallbackSettings.start_date,
+    simulation_years: toNumber(nextSettings.simulation_years, fallbackSettings.simulation_years),
+    monthly_total_contribution: toNumber(nextSettings.monthly_total_contribution, fallbackSettings.monthly_total_contribution),
+    default_expected_return: toNumber(nextSettings.default_expected_return, fallbackSettings.default_expected_return),
+    snapshot_month: toNumber(nextSettings.snapshot_month, fallbackSettings.snapshot_month),
+    contribution_timing: nextSettings.contribution_timing || fallbackSettings.contribution_timing,
+    display_interval: nextSettings.display_interval || fallbackSettings.display_interval,
+    include_emergency_cash: toBoolean(nextSettings.include_emergency_cash, true)
+  };
+}
+
+function normalizeScenarios(rows) {
+  const normalized = rows
+    .filter(row => cleanString(row.scenario_id) !== "")
+    .map(row => ({
+      scenario_id: cleanString(row.scenario_id),
+      scenario_name: cleanString(row.scenario_name || row.scenario_id),
+      expected_return_adjustment: toNumber(row.expected_return_adjustment, 0),
+      crash_month: toNullableNumber(row.crash_month),
+      crash_rate: toNullableNumber(row.crash_rate),
+      recovery_months: toNullableNumber(row.recovery_months),
+      include: toBoolean(row.include, true)
+    }));
+
+  if (normalized.length > 0) return normalized;
+  return fallbackScenarios;
+}
+
+async function loadData() {
+  const config = window.ASSET_SIMULATOR_CONFIG || {};
+  const googleSheets = config.googleSheets || {};
+  const urls = {
+    assets: googleSheets.assetsCsvUrl,
+    settings: googleSheets.settingsCsvUrl,
+    scenarios: googleSheets.scenariosCsvUrl
+  };
+
+  const allUrlsConfigured = [urls.assets, urls.settings, urls.scenarios].every(isConfiguredUrl);
+
+  if (!allUrlsConfigured) {
+    assets = fallbackAssets;
+    settings = fallbackSettings;
+    scenarios = fallbackScenarios;
+    setStatus("config.jsにCSV URLが未設定です。現在は内蔵サンプルデータで表示しています。");
+    return;
+  }
+
+  try {
+    setStatus("GoogleスプレッドシートからCSVを読み込んでいます...");
+    const [assetRows, settingRows, scenarioRows] = await Promise.all([
+      loadCsv(urls.assets, "Assets"),
+      loadCsv(urls.settings, "Settings"),
+      loadCsv(urls.scenarios, "Scenario")
+    ]);
+
+    assets = normalizeAssets(assetRows);
+    settings = normalizeSettings(settingRows);
+    scenarios = normalizeScenarios(scenarioRows);
+
+    if (assets.length === 0) {
+      throw new Error("Assets CSVに有効なasset_idがありません。");
+    }
+
+    setStatus(`Googleスプレッドシート接続中：Assets ${assets.length}件、Scenario ${scenarios.length}件を読み込みました。`);
+  } catch (error) {
+    console.error(error);
+    assets = fallbackAssets;
+    settings = fallbackSettings;
+    scenarios = fallbackScenarios;
+    setStatus(`CSV読み込みに失敗しました。内蔵サンプルデータで表示しています。${error.message}`, true);
+  }
+}
+
+function getMonthlyContribution(asset, currentSettings) {
   const direct = toNumber(asset.monthly_contribution, 0);
   if (direct !== 0) return direct;
 
-  // monthly_contributionが空欄の場合だけ、target_weightから補完するための保険。
   const targetWeight = toNumber(asset.target_weight, 0);
-  return toNumber(settings.monthly_total_contribution, 0) * targetWeight;
+  return toNumber(currentSettings.monthly_total_contribution, 0) * targetWeight;
 }
 
-function getMonthlyRate(asset, scenario, settings) {
+function getMonthlyRate(asset, scenario, currentSettings) {
   const baseAnnualReturn = toNumber(
     asset.expected_return_annual,
-    toNumber(settings.default_expected_return, 0)
+    toNumber(currentSettings.default_expected_return, 0)
   );
   const adjustedAnnualReturn = Math.max(
     -99,
@@ -288,16 +459,16 @@ function getMonthlyRate(asset, scenario, settings) {
   return Math.pow(1 + adjustedAnnualReturn / 100, 1 / 12) - 1;
 }
 
-function simulatePortfolio(assets, settings, scenario) {
-  const months = toNumber(settings.simulation_years, 30) * 12;
-  const startDate = new Date(settings.start_date);
-  const includedAssets = assets.filter(asset => asset.include === true || asset.include === "TRUE");
+function simulatePortfolio(assetList, currentSettings, scenario) {
+  const months = toNumber(currentSettings.simulation_years, 30) * 12;
+  const startDate = new Date(currentSettings.start_date);
+  const includedAssets = assetList.filter(asset => asset.include === true);
 
   let current = includedAssets.map(asset => ({
     ...asset,
     value: toNumber(asset.current_value, 0),
     principal: toNumber(asset.current_principal, 0),
-    monthlyContribution: getMonthlyContribution(asset, settings)
+    monthlyContribution: getMonthlyContribution(asset, currentSettings)
   }));
 
   const rows = [];
@@ -325,9 +496,9 @@ function simulatePortfolio(assets, settings, scenario) {
     if (month === months) break;
 
     current = current.map(asset => {
-      const monthlyRate = getMonthlyRate(asset, scenario, settings);
+      const monthlyRate = getMonthlyRate(asset, scenario, currentSettings);
       const contribution = asset.monthlyContribution;
-      const isBeginning = settings.contribution_timing === "beginning";
+      const isBeginning = currentSettings.contribution_timing === "beginning";
 
       let nextPrincipal;
       let nextValue;
@@ -340,8 +511,8 @@ function simulatePortfolio(assets, settings, scenario) {
         nextValue = asset.value * (1 + monthlyRate) + contribution;
       }
 
-      const crashMonth = scenario.crash_month === null ? null : toNumber(scenario.crash_month, null);
-      const crashRate = scenario.crash_rate === null ? null : toNumber(scenario.crash_rate, null);
+      const crashMonth = scenario.crash_month;
+      const crashRate = scenario.crash_rate;
       const isCrashTarget = asset.asset_class !== "cash" && asset.asset_type !== "cash";
 
       if (crashMonth !== null && crashRate !== null && month + 1 === crashMonth && isCrashTarget) {
@@ -407,10 +578,10 @@ function getYearlyTrendData(monthlyTotals) {
 }
 
 function updateSummaryCards(monthlyTotals, selectedMonth) {
-  const current = monthlyTotals.find(item => item.month === 0);
-  const snapshot = monthlyTotals.find(item => item.month === selectedMonth) || monthlyTotals[0];
+  const current = monthlyTotals.find(item => item.month === 0) || { value: 0 };
+  const snapshot = monthlyTotals.find(item => item.month === selectedMonth) || monthlyTotals[0] || { value: 0, profit: 0 };
   const totalMonthlyContribution = assets
-    .filter(asset => asset.include === true || asset.include === "TRUE")
+    .filter(asset => asset.include === true)
     .reduce((sum, asset) => sum + getMonthlyContribution(asset, settings), 0);
 
   document.getElementById("currentValue").textContent = formatYen(current.value);
@@ -420,7 +591,8 @@ function updateSummaryCards(monthlyTotals, selectedMonth) {
 }
 
 function updateSummaryTable(monthlyTotals) {
-  const checkpoints = [0, 12, 36, 60, 120, 240, 360, 600];
+  const maxMonth = toNumber(settings.simulation_years, 30) * 12;
+  const checkpoints = [0, 12, 36, 60, 120, 240, 360, 600].filter(month => month <= maxMonth);
   const tbody = document.getElementById("summaryTableBody");
   tbody.innerHTML = "";
 
@@ -557,6 +729,7 @@ function renderPieChart(snapshotData, selectedMonth, mode) {
     asset_class: "資産クラス別",
     asset_name: "銘柄別",
     exposure_currency: "実質通貨別",
+    value_currency: "評価通貨別",
     asset_type: "商品タイプ別"
   }[mode];
 
@@ -571,7 +744,7 @@ function updateSnapshotLabels(selectedMonth) {
 
 function updateDashboard() {
   const scenarioId = document.getElementById("scenarioSelect").value;
-  const scenario = scenarios.find(item => item.scenario_id === scenarioId) || scenarios[0];
+  const scenario = scenarios.find(item => item.scenario_id === scenarioId) || scenarios[0] || fallbackScenarios[0];
   const selectedMonth = toNumber(document.getElementById("snapshotRange").value, settings.snapshot_month);
   const pieMode = document.getElementById("pieModeSelect").value;
 
@@ -592,6 +765,8 @@ function initControls() {
   const snapshotRange = document.getElementById("snapshotRange");
   const pieModeSelect = document.getElementById("pieModeSelect");
 
+  scenarioSelect.innerHTML = "";
+
   for (const scenario of scenarios.filter(item => item.include)) {
     const option = document.createElement("option");
     option.value = scenario.scenario_id;
@@ -599,13 +774,18 @@ function initControls() {
     scenarioSelect.appendChild(option);
   }
 
-  snapshotRange.max = String(settings.simulation_years * 12);
-  snapshotRange.value = String(settings.snapshot_month);
+  snapshotRange.max = String(toNumber(settings.simulation_years, 30) * 12);
+  snapshotRange.value = String(toNumber(settings.snapshot_month, 60));
 
   scenarioSelect.addEventListener("change", updateDashboard);
   snapshotRange.addEventListener("input", updateDashboard);
   pieModeSelect.addEventListener("change", updateDashboard);
 }
 
-initControls();
-updateDashboard();
+async function initApp() {
+  await loadData();
+  initControls();
+  updateDashboard();
+}
+
+initApp();

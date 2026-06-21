@@ -11,11 +11,18 @@
     <div>
       <p class="eyebrow">Portfolio Management</p>
       <h1>Asset Simulator</h1>
-      <p class="lead">現在のポートフォリオと毎月積立額から、将来の資産推移をシミュレーションします。</p>
+      <p class="lead">Googleスプレッドシートの Assets / Settings / Scenario を読み込み、将来の資産推移をシミュレーションします。</p>
     </div>
   </header>
 
   <main class="container">
+    <section class="status-card card" aria-live="polite">
+      <div>
+        <strong>データ接続</strong>
+        <p id="dataSourceStatus">読み込み準備中です。</p>
+      </div>
+    </section>
+
     <section class="control-panel card">
       <div class="control-group">
         <label for="scenarioSelect">シナリオ</label>
@@ -37,6 +44,7 @@
           <option value="asset_class">資産クラス別</option>
           <option value="asset_name">銘柄別</option>
           <option value="exposure_currency">実質通貨別</option>
+          <option value="value_currency">評価通貨別</option>
           <option value="asset_type">商品タイプ別</option>
         </select>
       </div>
@@ -112,10 +120,12 @@
   </main>
 
   <footer class="app-footer">
-    <p>Step 2: fixed data version. Next step is loading Assets / Settings / Scenario from Google Sheets CSV.</p>
+    <p>Step 3: Google Sheets CSV connection version.</p>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
